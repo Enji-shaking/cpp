@@ -8,4 +8,4 @@ T sq(const T& x)
 // with this, not okay
 
 // this export the instantiation for doubles
-template double sq<double>(const double&);
+// template double sq<double>(const double&);

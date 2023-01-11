@@ -5,7 +5,7 @@ using namespace std;
 int main() {
 //    double x = sq(3.14); // with sq_error.h compiles but does not link
    double x = sq(3.14); // with sq.h compiles and link for double
-   int y = sq(3);       // error, no instantiation for int sq<int>(int const&)
+   // int y = sq(3);       // error, no instantiation for int sq<int>(int const&)
    cout << x << endl;
-   cout << y << endl;
+   // cout << y << endl;
 }

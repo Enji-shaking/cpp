@@ -918,8 +918,275 @@ In explanation:
     `struct MultiTypes<TypeList<submodules...>>: ModuleHolder<submodules...>`
   * It forces `submodules` be the actual modules we want.
   * It also inherits from `ModuleHolder`, which makes us can simply call m.foo(). foo() is defined in ModuleHolder
-* Why do we have to define a TypeList?
+  * In MultiType, **using Base::Base** allow us to call `.foo()` from this class
+* Why do we have to define a **TypeList**?
   * We have to have this line, first of all.
   * `template <typename T> struct MultiTypes{};`
+  * We want to know what are the submodules we are interested in
+  * The main purpose of TypeList is to extract the modules and place it in our moduleHolder
   * If we write this line for MultiTypes: `struct MultiTypes<submodules...>: ModuleHolder<submodules...>`
   * The compiler cannot distinguish between it and the primary type when we only have one thing inside. This is because T and submodules are all non-existing types.
+
+To have a length of the typelist, modify struct ModuleHolder like below
+
+```C++
+template <typename Module, typename... RemainingModules>
+struct ModuleHolder: ModuleHolder<RemainingModules...>{
+    using Base = ModuleHolder<RemainingModules...>;
+    void foo(){
+        Base::foo();
+        m.work();
+    }
+    **enum {len = 1 + Base::len};**
+    Module m;
+};
+
+template <typename Module>
+struct ModuleHolder<Module>{
+    void foo(){
+        m.work();
+    }
+    **enum {len = 1};**
+    Module m;
+};
+...
+MultiTypes<TypeList<A, B, A, A, B, B>> m;
+cout << m.len << endl;
+```
+
+----
+Okay, the content in between is not complete. The book proposed a long typelist, which I don't think is useful.
+The typelist supports adding/removing/searching operations. If needed, look for it in the future.
+It basically works as a primitive data structures
+https://codereview.stackexchange.com/questions/269320/c17-typelist-manipulation
+A good article discussing typelist
+
+#### Call a member function based on given variable?
+
+Given a struct `WidgetFactory`, who has three different functions
+``` C++
+class WidgetFactory 
+{ 
+public: 
+ virtual Window* CreateWindow() = 0; 
+ virtual Button* CreateButton() = 0; 
+ virtual ScrollBar* CreateScrollBar() = 0; 
+};
+```
+
+We want to provide something like this, calling a particular function based on type.
+```C++
+template <class T> 
+T* MakeRedWidget(WidgetFactory& factory) 
+{ 
+ T* pW = factory.CreateT(); // huh???
+ pW->SetColor(RED); 
+ return pW; 
+} 
+
+```
+**But**, this is not allowed.
+
+We can do this by falling factory.create<T>()...
+
+----
+
+
+### Template across different files
+Normally, we define a template in the header file. However, we could do something as below to constraint the specialization of templates
+
+```C++
+// sq.h
+template <typename T>
+T sq(const T& x);
+
+
+// sq.cpp
+#include "sq.h"
+template <typename T>
+T sq(const T& x)
+{
+    return x*x; 
+}
+template double sq<double>(const double&);
+```
+This hides all definition inside the .cpp file. (I have no fucking idea why)
+Except the last line. 
+The last line expose a variation of sq, with T = double. 
+Then in main, we have code as below
+
+```C++
+#include <iostream>
+using namespace std;
+#include "sq.h" // note: function body not visible
+int main() {
+   double x = sq(3.14); // with sq.h compiles and link for double
+   // int y = sq(3);       // error, no instantiation for int sq<int>(int const&)
+   cout << x << endl;
+   // cout << y << endl;
+}
+```
+calling `sq(3.14)` works because we exposed the version for double. But `sq(3)` doesn't because we never exposed int.
+We **force the instantiation** of a template entity **in a translation unit** without 
+ever using it.
+
+### key words
+
+#### typename
+
+a dependent name means its meaning depends on T, which is an unknown variable
+Example:
+```C++
+template <typename T>
+void SomeFunc()
+{
+ MyClass<T>::Y * Q; 
+};
+```
+The line could have two meanings:
+* the declaration of local pointer-to-double named Q;
+* or the product of the constant 314, times the global variable Q
+
+Thus, for `MyClass<T>::Y` to refer a type, it must be introduced with the typename keyword
+
+```C++
+template <typename X>
+class AnotherClass
+{
+ MyClass<X>::Type t1_; // error: 'Type' is a dependent name
+ typename MyClass<X>::Type t2_; // ok
+ MyClass<double>::Type t3_; // ok: 'Type' is independent of X
+};
+```
+
+typename may introduce a new dependent type, that depends on it
+```C++
+template <typename T, typename T::type N>
+struct SomeClass
+{
+};
+struct S1
+{
+ typedef int type;
+};
+int main()
+{
+    // SomeClass<S1, 3.5> x;
+    // invalid, S1::type is an int, not a double
+    SomeClass<S1, 3> x;
+}
+```
+
+### Angle Brackets
+Prior to C++17, even if all parameters have a default value, you cannot entirely omit the angle brackets.
+``` C++
+template <typename T = double>
+class sum {};
+sum<> S1; // ok, using double
+sum S2; // error
+// error: use of class template 'sum' requires template arguments
+```
+It's never been a problem for templated function though. The code below works just fine
+``` C++
+template <typename T = double>
+void foo() {};
+foo<>(); 
+foo(); 
+```
+**I don't think it's ever a problem with C++17**
+
+### Universal constructor??
+
+A **template copy constructor** and an assignment **are not called** when dealing with two objects of the **very same kind**. In another word, in the scenario where a normal copy constructor should be called.
+
+```C++
+template <typename T>
+class something
+{
+public:
+    something(){}
+    // not called when S == T
+    template <typename S>
+    something(const something<S>& that)
+    {
+        cout << "template copy" << endl;
+    }
+ 
+    // An incorrect way
+    //  something(const something<T>& that)
+    //  {
+    //     cout << "normal copy" << endl;
+    //  }
+
+    something(const something& that)
+    {
+        cout << "normal copy" << endl;
+    }
+    // not called when S == T
+    template <typename S>
+    something& operator=(const something<S>& that)
+    {
+        cout << "template assignment" << endl;
+        return *this;
+    }
+
+    something& operator=(const something& that)
+    {
+        cout << "normal assignment" << endl;
+        return *this;
+    }
+};
+int main()
+{
+    something<int> s0;
+    something<double> s1, s2;
+    // template assignment
+    s0 = s1; // calls user defined operator=
+    // normal assignment
+    s1 = s2; // calls the default assignment
+}
+```
+A quick reference: https://stackoverflow.com/questions/19167201/copy-constructor-of-template-class
+* even though A is a template, when you refer to it inside the class as A (such as in the function signatures) it is treated as the full type A<T>.
+
+#### So, how do we write a constructor with universal reference and perfect forwarding?
+
+```C++
+template <typename D, typename S>
+struct MyClass {
+    template <typename DD, typename SS>
+    constexpr MyClass(DD &&d, SS &&s): d_(std::forward<DD>(d)), s_(std::forward<SS>(s)) {}
+private:
+    D d_;
+    S s_;
+};
+
+int main()
+{
+    auto c1 = MyClass<int, string>(1, std::string("Hello"));    // rvalues
+    auto idx = 2;
+    auto msg = std::string("World");
+    auto c2 = MyClass<int, string>(idx, msg);    // lvalues
+}
+```
+https://stackoverflow.com/questions/64262171/how-to-write-a-constructor-for-a-template-class-using-universal-reference-argume
+Here, have to specify variable types in main function to call it. This is to enable type deduction. As Scott Meyer introduces, to make `&&` universal reference, it has to have type deduction also enabled.
+
+If we remove the type there, as below
+```C++
+template <typename D, typename S>
+struct MyClass {
+    constexpr MyClass(D &&d, S &&s): d_(move(d)), s_(move(s)) {}
+private:
+    D d_;
+    S s_;
+};
+```
+This will error for the line 
+`auto c2 = MyClass<int, string>(idx, msg);`
+Because the constructor is not a universal constructor. Instead, it's a rvalue constructor only. While c2 wants to call a constructor with lvalues.
+
+### Universal reference
+A long article
+https://isocpp.org/blog/2012/11/universal-references-in-c11-scott-meyers
+../../universal_reference.md 
